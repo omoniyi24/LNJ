@@ -1,2 +1,2 @@
 # LNJ
-Lightning Network node implementation with Lightning Dev Kit (JAVA)
+Lightning Network Jay is a node implementation with Lightning Dev Kit (JAVA)
