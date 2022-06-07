@@ -1,10 +1,9 @@
 package com.omoniyi.lnj.model;
 
-import lombok.Data;
+
 
 import java.util.List;
 
-@Data
 public class BitcoinRequest{
 
     private String jsonrpc;

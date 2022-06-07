@@ -1,13 +1,18 @@
 package com.omoniyi.lnj;
 
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
+import com.omoniyi.lnj.service.LDJService;
+import org.ldk.batteries.ChannelManagerConstructor;
 
-@SpringBootApplication
+import java.io.IOException;
+
+//@SpringBootApplication
 public class LnjApplication {
 
-	public static void main(String[] args) {
-		SpringApplication.run(LnjApplication.class, args);
+	public static void main(String[] args) throws IOException, ChannelManagerConstructor.InvalidSerializedDataException {
+		System.out.println("Hey...");
+		LDJService app = new LDJService();
+		app.start();
+//		SpringApplication.run(LnjApplication.class, args);
 	}
 
 }

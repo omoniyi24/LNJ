@@ -1,12 +1,10 @@
 package com.omoniyi.lnj.model;
 
-import lombok.Data;
 
 /**
  * @author OMONIYI ILESANMI
  */
 
-@Data
 public class TxBlockInfo {
 
     public final Block block;

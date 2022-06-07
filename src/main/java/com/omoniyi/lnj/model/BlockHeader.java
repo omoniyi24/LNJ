@@ -1,11 +1,9 @@
 package com.omoniyi.lnj.model;
 
-import lombok.Data;
 
 /**
  * @author OMONIYI ILESANMI
  */
-@Data
 public class BlockHeader {
 
     public final int height;

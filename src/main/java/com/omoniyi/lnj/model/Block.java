@@ -1,14 +1,11 @@
 package com.omoniyi.lnj.model;
 
-import lombok.Data;
-import lombok.EqualsAndHashCode;
+
 
 /**
  * @author OMONIYI ILESANMI
  */
 
-@Data
-@EqualsAndHashCode
 public class Block {
 
     public int height;
