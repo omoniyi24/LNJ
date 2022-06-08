@@ -8,11 +8,16 @@ import java.io.IOException;
 //@SpringBootApplication
 public class LnjApplication {
 
-	public static void main(String[] args) throws IOException, ChannelManagerConstructor.InvalidSerializedDataException {
+	public static void main(String[] args){
 		System.out.println("Hey...");
 		LDJService app = new LDJService();
-		app.start();
-//		SpringApplication.run(LnjApplication.class, args);
+		try {
+			app.start();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} catch (ChannelManagerConstructor.InvalidSerializedDataException e) {
+			e.printStackTrace();
+		}
 	}
 
 }
