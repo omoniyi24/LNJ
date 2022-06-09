@@ -125,156 +125,157 @@ public class LDJService {
         });
 
         final ChainMonitor chainMonitor = ChainMonitor.of(Option_FilterZ.some(filter), txBroadcaster, logger, feeEstimator, persist);
-
-        // Step 9
-        final var seed = Hex.decode(SEED);
-        final var startupTime = System.currentTimeMillis();
-        final var keyManager = KeysManager.of(
-                seed,
-                startupTime / 1000,
-                (int) (startupTime * 1000)
-        );
-
-        // Step 10
-        final var directory = new File("data/channels");
-        var channelMonitors = new byte[][]{};
-        if (directory.exists() && directory.isDirectory()) {
-            channelMonitors = Arrays.stream(directory.listFiles())
-                    .map(File::toPath)
-                    .map(path -> {
-                        try {
-                            return (Files.readAllBytes(path));
-                        } catch (IOException e) {
-                            return null;
-                        }
-                    })
-                    .filter(Objects::nonNull)
-                    .toArray(byte[][]::new);
-        }
-
-        // Step 11
-        final var channelManagerFile = new File("data/channel-manager.dat");
-        byte[] serializedChannelManager = null;
-        if (channelManagerFile.exists() && channelManagerFile.isFile()) {
-            serializedChannelManager = Files.readAllBytes(channelManagerFile.toPath());
-        }
-
-        ChannelManagerConstructor channelManagerConstructor;
-        if (serializedChannelManager == null) {
-            final var currentBlockHeight = chainBackend.blockHeight(); //126;
-            final var latestBlockHash = chainBackend.blockHash(currentBlockHeight);
-            channelManagerConstructor = new ChannelManagerConstructor(
-                    Network.LDKNetwork_Regtest,
-                    UserConfig.with_default(),
-                    latestBlockHash,
-                    currentBlockHeight,
-                    keyManager.as_KeysInterface(),
-                    feeEstimator,
-                    chainMonitor,
-                    null,
-                    txBroadcaster,
-                    logger
-            );
-        } else {
-            channelManagerConstructor = new org.ldk.batteries.ChannelManagerConstructor(
-                    serializedChannelManager,
-                    channelMonitors,
-                    UserConfig.with_default(),
-                    keyManager.as_KeysInterface(),
-                    feeEstimator, chainMonitor, filter,
-                    null,
-                    txBroadcaster,
-                    logger
-            );
-        }
-        final ChannelManager channelManager = channelManagerConstructor.channel_manager;
-
-        // Step 6
-        final var channelManagerPersister = new ChannelManagerConstructor.EventHandler() {
-
-            @Override
-            public void handle_event(final Event e) {
-                final var params = NetworkParameters.fromID(ID_REGTEST);
-                if (e instanceof Event.FundingGenerationReady) {
-                    var event = (Event.FundingGenerationReady) e;
-                    final var transaction = new Transaction(params);
-                    final var input = new TransactionInput(params, transaction, new byte[0]);
-                    input.setWitness(new TransactionWitness(2));
-                    input.getWitness().setPush(0, new byte[]{0x1});
-                    transaction.addInput(input);
-                    final var script = new Script(event.output_script);
-                    final var value = Coin.SATOSHI.multiply(event.channel_value_satoshis);
-                    transaction.addOutput(value, script);
-                    channelManager.funding_transaction_generated(event.temporary_channel_id, transaction.bitcoinSerialize());
-                } else if (e instanceof Event.PaymentReceived) {
-                    var event = (Event.PaymentReceived) e;
-                    System.out.printf("Payment of %s SAT received.%n", event.amt);
-                    channelManager.claim_funds(event.payment_hash);
-                } else if (e instanceof Event.PaymentSent) {
-                    var event = (Event.PaymentSent) e;
-                    System.out.printf("Payment with preimage '%s' sent.%n", Hex.toHexString(event.payment_preimage));
-                } else if (e instanceof Event.PaymentFailed) {
-                    var event = (Event.PaymentFailed) e;
-                    System.out.printf("Payment with payment hash '%s' failed.%n", Hex.toHexString(event.payment_hash));
-                } else if (e instanceof Event.PendingHTLCsForwardable) {
-                    var event = (Event.PendingHTLCsForwardable) e;
-                    channelManager.process_pending_htlc_forwards();
-                } else if (e instanceof Event.SpendableOutputs) {
-                    var event = (Event.SpendableOutputs) e;
-                    final var tx = keyManager.spend_spendable_outputs(
-                            event.outputs,
-                            new TxOut[]{},
-                            Hex.decode(refundAddress),
-                            feeEstimator.get_est_sat_per_1000_weight(ConfirmationTarget.LDKConfirmationTarget_HighPriority)
-                    );
-                    if (tx instanceof Result_TransactionNoneZ.Result_TransactionNoneZ_OK) {
-                        chainBackend.publish(((Result_TransactionNoneZ.Result_TransactionNoneZ_OK) tx).res);
-                    }
-                }
-            }
-
-            @Override
-            public void persist_manager(final byte[] bytes) {
-                write("channel-manager.dat", bytes);
-            }
-
-            @Override
-            public void persist_network_graph(byte[] network_graph) {
-
-            }
-        };
-
-        // Step 12 - TODO
-        // Retrieve transaction IDs to check the chain for un-confirmation.
-        byte[][] relevant_txids_1 = channelManager.as_Confirm().get_relevant_txids();
-        byte[][] relevant_txids_2 = chainMonitor.as_Confirm().get_relevant_txids();
-        final var list = new ArrayList<>(List.of(relevant_txids_1));
-        list.addAll(List.of(relevant_txids_2));
-        list.stream()
-                .filter(txid -> !chainBackend.isConfirmed(txid))
-                .forEach(txid -> {
-                    channelManager.as_Confirm().transaction_unconfirmed(txid);
-                    chainMonitor.as_Confirm().transaction_unconfirmed(txid);
-                });
-
-        checkBlockchain(relevantTxs, channelManager, chainMonitor);
-        channelManagerConstructor.chain_sync_completed(channelManagerPersister, null);
-
-        // Step 13 - DONE
-        final NioPeerHandler peerHandler = channelManagerConstructor.nio_peer_handler;
-        final int port = 9730;
-        peerHandler.bind_listener(new InetSocketAddress("0.0.0.0", port));
-        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
-
-        final var peerPubKey = Hex.decode(PEER_PUBKEY);
-
-        System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
-
-        peerHandler.connect(
-                peerPubKey,
-                new InetSocketAddress(PEER_HOST, PEER_PORT),
-                10000
-        );
+//        final ChainMonitor chainMonitor = null;
+//
+//        // Step 9
+//        final var seed = Hex.decode(SEED);
+//        final var startupTime = System.currentTimeMillis();
+//        final var keyManager = KeysManager.of(
+//                seed,
+//                startupTime / 1000,
+//                (int) (startupTime * 1000)
+//        );
+//
+//        // Step 10
+//        final var directory = new File("data/channels");
+//        var channelMonitors = new byte[][]{};
+//        if (directory.exists() && directory.isDirectory()) {
+//            channelMonitors = Arrays.stream(directory.listFiles())
+//                    .map(File::toPath)
+//                    .map(path -> {
+//                        try {
+//                            return (Files.readAllBytes(path));
+//                        } catch (IOException e) {
+//                            return null;
+//                        }
+//                    })
+//                    .filter(Objects::nonNull)
+//                    .toArray(byte[][]::new);
+//        }
+//
+//        // Step 11
+//        final var channelManagerFile = new File("data/channel-manager.dat");
+//        byte[] serializedChannelManager = null;
+//        if (channelManagerFile.exists() && channelManagerFile.isFile()) {
+//            serializedChannelManager = Files.readAllBytes(channelManagerFile.toPath());
+//        }
+//
+//        ChannelManagerConstructor channelManagerConstructor;
+//        if (serializedChannelManager == null) {
+//            final var currentBlockHeight = chainBackend.blockHeight(); //126;
+//            final var latestBlockHash = chainBackend.blockHash(currentBlockHeight);
+//            channelManagerConstructor = new ChannelManagerConstructor(
+//                    Network.LDKNetwork_Regtest,
+//                    UserConfig.with_default(),
+//                    latestBlockHash,
+//                    currentBlockHeight,
+//                    keyManager.as_KeysInterface(),
+//                    feeEstimator,
+//                    chainMonitor,
+//                    null,
+//                    txBroadcaster,
+//                    logger
+//            );
+//        } else {
+//            channelManagerConstructor = new org.ldk.batteries.ChannelManagerConstructor(
+//                    serializedChannelManager,
+//                    channelMonitors,
+//                    UserConfig.with_default(),
+//                    keyManager.as_KeysInterface(),
+//                    feeEstimator, chainMonitor, filter,
+//                    null,
+//                    txBroadcaster,
+//                    logger
+//            );
+//        }
+//        final ChannelManager channelManager = channelManagerConstructor.channel_manager;
+//
+//        // Step 6
+//        final var channelManagerPersister = new ChannelManagerConstructor.EventHandler() {
+//
+//            @Override
+//            public void handle_event(final Event e) {
+//                final var params = NetworkParameters.fromID(ID_REGTEST);
+//                if (e instanceof Event.FundingGenerationReady) {
+//                    var event = (Event.FundingGenerationReady) e;
+//                    final var transaction = new Transaction(params);
+//                    final var input = new TransactionInput(params, transaction, new byte[0]);
+//                    input.setWitness(new TransactionWitness(2));
+//                    input.getWitness().setPush(0, new byte[]{0x1});
+//                    transaction.addInput(input);
+//                    final var script = new Script(event.output_script);
+//                    final var value = Coin.SATOSHI.multiply(event.channel_value_satoshis);
+//                    transaction.addOutput(value, script);
+//                    channelManager.funding_transaction_generated(event.temporary_channel_id, transaction.bitcoinSerialize());
+//                } else if (e instanceof Event.PaymentReceived) {
+//                    var event = (Event.PaymentReceived) e;
+//                    System.out.printf("Payment of %s SAT received.%n", event.amt);
+//                    channelManager.claim_funds(event.payment_hash);
+//                } else if (e instanceof Event.PaymentSent) {
+//                    var event = (Event.PaymentSent) e;
+//                    System.out.printf("Payment with preimage '%s' sent.%n", Hex.toHexString(event.payment_preimage));
+//                } else if (e instanceof Event.PaymentFailed) {
+//                    var event = (Event.PaymentFailed) e;
+//                    System.out.printf("Payment with payment hash '%s' failed.%n", Hex.toHexString(event.payment_hash));
+//                } else if (e instanceof Event.PendingHTLCsForwardable) {
+//                    var event = (Event.PendingHTLCsForwardable) e;
+//                    channelManager.process_pending_htlc_forwards();
+//                } else if (e instanceof Event.SpendableOutputs) {
+//                    var event = (Event.SpendableOutputs) e;
+//                    final var tx = keyManager.spend_spendable_outputs(
+//                            event.outputs,
+//                            new TxOut[]{},
+//                            Hex.decode(refundAddress),
+//                            feeEstimator.get_est_sat_per_1000_weight(ConfirmationTarget.LDKConfirmationTarget_HighPriority)
+//                    );
+//                    if (tx instanceof Result_TransactionNoneZ.Result_TransactionNoneZ_OK) {
+//                        chainBackend.publish(((Result_TransactionNoneZ.Result_TransactionNoneZ_OK) tx).res);
+//                    }
+//                }
+//            }
+//
+//            @Override
+//            public void persist_manager(final byte[] bytes) {
+//                write("channel-manager.dat", bytes);
+//            }
+//
+//            @Override
+//            public void persist_network_graph(byte[] network_graph) {
+//
+//            }
+//        };
+//
+//        // Step 12 - TODO
+//        // Retrieve transaction IDs to check the chain for un-confirmation.
+//        byte[][] relevant_txids_1 = channelManager.as_Confirm().get_relevant_txids();
+//        byte[][] relevant_txids_2 = chainMonitor.as_Confirm().get_relevant_txids();
+//        final var list = new ArrayList<>(List.of(relevant_txids_1));
+//        list.addAll(List.of(relevant_txids_2));
+//        list.stream()
+//                .filter(txid -> !chainBackend.isConfirmed(txid))
+//                .forEach(txid -> {
+//                    channelManager.as_Confirm().transaction_unconfirmed(txid);
+//                    chainMonitor.as_Confirm().transaction_unconfirmed(txid);
+//                });
+//
+//        checkBlockchain(relevantTxs, channelManager, chainMonitor);
+//        channelManagerConstructor.chain_sync_completed(channelManagerPersister, null);
+//
+//        // Step 13 - DONE
+//        final NioPeerHandler peerHandler = channelManagerConstructor.nio_peer_handler;
+//        final int port = 9730;
+//        peerHandler.bind_listener(new InetSocketAddress("0.0.0.0", port));
+//        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
+//
+//        final var peerPubKey = Hex.decode(PEER_PUBKEY);
+//
+//        System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
+//
+//        peerHandler.connect(
+//                peerPubKey,
+//                new InetSocketAddress(PEER_HOST, PEER_PORT),
+//                10000
+//        );
     }
 
     void checkBlockchain(List<WatchedTransaction> relevantTxs, ChannelManager channelManager, ChainMonitor chainMonitor) {
