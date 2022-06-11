@@ -1,9 +1,6 @@
-package com.omoniyi.lnj.service;
+package com.omoniyi.lnj;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
-import com.omoniyi.lnj.service.bitcoin.ChainBackend;
-import com.omoniyi.lnj.service.bitcoin.impl.BitcoinCoreChainBackend;
-import com.omoniyi.lnj.util.Env;
+import com.omoniyi.lnj.bitcoin.impl.BitcoinCoreChainBackend;
 import org.bitcoinj.core.*;
 import org.bitcoinj.script.Script;
 import org.bouncycastle.util.encoders.Hex;
@@ -18,14 +15,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.security.SecureRandom;
 import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.bitcoinj.core.NetworkParameters.ID_REGTEST;
-import static org.bouncycastle.util.Arrays.reverse;
 
 
 /**
@@ -33,48 +27,30 @@ import static org.bouncycastle.util.Arrays.reverse;
  */
 public class LDJService {
 
-    private final String SEED = Env.get("LDK_SEED");
-    private final String PEER_PUBKEY = Env.get("LDK_PEER_PUBKEY");
-    private final String PEER_HOST = Env.get("LDK_PEER_HOST");
-    private final int PEER_PORT = Integer.parseInt(Env.get("LDK_PEER_PORT"));
+    private final String SEED = "1E99423A4ED27608A15A2616A2B0E9E52CED330AC530EDCC32C8FFC6A526AEDD";
+    private final String PEER_PUBKEY = "03ebb579eefc96a67517761c2c9d1ca692466d43e4f7ca7773db342f3aa8ff5716";
+    private final String PEER_HOST = "127.0.0.1";
+    private final int PEER_PORT = 10009;
     private final String refundAddress = "";
 
 
-    private final ChainBackend chainBackend = new BitcoinCoreChainBackend(NetworkParameters.fromID(ID_REGTEST));
+    private final BitcoinCoreChainBackend chainBackend = new BitcoinCoreChainBackend(NetworkParameters.fromID(ID_REGTEST));
 
-    static void write(final String identifier, final byte[] data) {
-        try {
-            final var fileName = String.format("data/%s", identifier);
-            final var file = new File(fileName);
-            if (file.exists() || file.getParentFile().mkdirs() && file.createNewFile()) {
-                final var out = new FileOutputStream(fileName);
-                out.write(data);
-                out.close();
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
+    static class WatchedTransaction {
+        public final byte[] id;
+
+        public final byte[] scriptPubKey;
+
+        public WatchedTransaction(final byte[] id, final byte[] scriptPubKey) {
+            this.id = id;
+            this.scriptPubKey = scriptPubKey;
         }
     }
 
-    public void start() throws IOException, ChannelManagerConstructor.InvalidSerializedDataException {
-
+    void start() throws Exception {
         // Step 1
         final var feeEstimator = org.ldk.structs.FeeEstimator.new_impl(confirmation_target -> {
-            int fee = 0;
-            switch (confirmation_target) {
-                case LDKConfirmationTarget_Background:
-                    fee = 253;
-                    break;
-                case LDKConfirmationTarget_Normal:
-                    fee = 2000;
-                    break;
-                case LDKConfirmationTarget_HighPriority:
-                    fee = 5000;
-                    break;
-                default:
-                    System.out.println("[-] Fee other than 253, 2000 or 5000");
-            }
-            return fee;
+            return 12500; // TODO
         });
 
         // Step 2
@@ -89,14 +65,14 @@ public class LDJService {
         final var persist = Persist.new_impl(new Persist.PersistInterface() {
 
             @Override
-            public Result_NoneChannelMonitorUpdateErrZ persist_new_channel(OutPoint id, ChannelMonitor data, MonitorUpdateId update_id) {
+            public Result_NoneChannelMonitorUpdateErrZ persist_new_channel(OutPoint id, ChannelMonitor data, MonitorUpdateId monitorUpdateId) {
                 System.out.printf("Persist new %s / %s%n", Hex.toHexString(id.to_channel_id()), Hex.toHexString(reverse(id.get_txid())));
                 persist(id, data.write());
                 return Result_NoneChannelMonitorUpdateErrZ.ok();
             }
 
             @Override
-            public Result_NoneChannelMonitorUpdateErrZ update_persisted_channel(OutPoint id, ChannelMonitorUpdate update, ChannelMonitor data, MonitorUpdateId update_id) {
+            public Result_NoneChannelMonitorUpdateErrZ update_persisted_channel(OutPoint id, ChannelMonitorUpdate channelMonitorUpdate, ChannelMonitor data, MonitorUpdateId monitorUpdateId) {
                 System.out.printf("Persist existing %s / %s%n", Hex.toHexString(id.to_channel_id()), Hex.toHexString(reverse(id.get_txid())));
                 persist(id, data.write());
                 return Result_NoneChannelMonitorUpdateErrZ.ok();
@@ -124,6 +100,7 @@ public class LDJService {
             }
         });
 
+        // Step 8
         final ChainMonitor chainMonitor = ChainMonitor.of(Option_FilterZ.some(filter), txBroadcaster, logger, feeEstimator, persist);
 
         // Step 9
@@ -176,12 +153,14 @@ public class LDJService {
                     logger
             );
         } else {
-            channelManagerConstructor = new org.ldk.batteries.ChannelManagerConstructor(
+            channelManagerConstructor = new ChannelManagerConstructor(
                     serializedChannelManager,
                     channelMonitors,
                     UserConfig.with_default(),
                     keyManager.as_KeysInterface(),
-                    feeEstimator, chainMonitor, filter,
+                    feeEstimator,
+                    chainMonitor,
+                    filter,
                     null,
                     txBroadcaster,
                     logger
@@ -239,7 +218,7 @@ public class LDJService {
             }
 
             @Override
-            public void persist_network_graph(byte[] network_graph) {
+            public void persist_network_graph(byte[] bytes) {
 
             }
         };
@@ -263,9 +242,12 @@ public class LDJService {
         // Step 13 - DONE
         final NioPeerHandler peerHandler = channelManagerConstructor.nio_peer_handler;
         final int port = 9730;
-        peerHandler.bind_listener(new InetSocketAddress("0.0.0.0", port));
-        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
-
+        peerHandler.bind_listener(new InetSocketAddress("127.0.0.1", port));
+//        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
+        System.out.printf("LNQ node %s 127.0.0.1:%d%n"
+                , Hex.toHexString(channelManager.get_our_node_id())
+                , port
+        );
         final var peerPubKey = Hex.decode(PEER_PUBKEY);
 
         System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
@@ -275,6 +257,15 @@ public class LDJService {
                 new InetSocketAddress(PEER_HOST, PEER_PORT),
                 10000
         );
+
+
+        createInvoice(channelManager, keyManager);
+
+        while (true) {
+            checkBlockchain(relevantTxs, channelManager, chainMonitor);
+            System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
+            Thread.sleep(10000);
+        }
     }
 
     void checkBlockchain(List<WatchedTransaction> relevantTxs, ChannelManager channelManager, ChainMonitor chainMonitor) {
@@ -332,14 +323,17 @@ public class LDJService {
         return output;
     }
 
-    static class WatchedTransaction {
-        public final byte[] id;
-
-        public final byte[] scriptPubKey;
-
-        public WatchedTransaction(final byte[] id, final byte[] scriptPubKey) {
-            this.id = id;
-            this.scriptPubKey = scriptPubKey;
+    static void write(final String identifier, final byte[] data) {
+        try {
+            final var fileName = String.format("data/%s", identifier);
+            final var file = new File(fileName);
+            if (file.exists() || file.getParentFile().mkdirs() && file.createNewFile()) {
+                final var out = new FileOutputStream(fileName);
+                out.write(data);
+                out.close();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
         }
     }
 }

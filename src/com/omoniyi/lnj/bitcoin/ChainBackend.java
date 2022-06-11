@@ -1,4 +1,4 @@
-package com.omoniyi.lnj.service.bitcoin;
+package com.omoniyi.lnj.bitcoin;
 
 import java.util.Arrays;
 import java.util.Objects;
