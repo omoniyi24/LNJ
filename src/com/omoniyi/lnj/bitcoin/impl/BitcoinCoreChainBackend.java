@@ -1,7 +1,7 @@
-package com.omoniyi.lnj.service.bitcoin.impl;
+package com.omoniyi.lnj.bitcoin.impl;
 
-import com.omoniyi.lnj.service.bitcoin.ChainBackend;
-import com.omoniyi.lnj.util.Env;
+
+import com.omoniyi.lnj.bitcoin.ChainBackend;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -18,8 +18,8 @@ import java.util.Arrays;
 
 public class BitcoinCoreChainBackend implements ChainBackend {
 
-    private final String URL = Env.get("BTC_CORE_URL");
-    private final String AUTH = Env.get("BTC_CORE_AUTH");
+    private final String URL = "http://127.0.0.1:18443";
+    private final String AUTH = "dXNlcjpwYXNz";
 
     public static final MediaType JSON
             = MediaType.get("application/json; charset=utf-8");
@@ -109,7 +109,7 @@ public class BitcoinCoreChainBackend implements ChainBackend {
             final var buffer = ByteBuffer.wrap(new byte[80]);
             buffer.order(ByteOrder.LITTLE_ENDIAN);
             buffer.putInt(json.getInt("version"));
-//            buffer.put(reverse(Hex.decode(json.getString("previousblockhash"))), 0, 32);
+            buffer.put(reverse(Hex.decode(json.getString("previousblockhash"))), 0, 32);
             buffer.put(reverse(Hex.decode(json.getString("merkleroot"))), 0, 32);
             buffer.putInt(json.getInt("time"));
             buffer.put(reverse(Hex.decode(json.getString("bits"))), 0, 4);

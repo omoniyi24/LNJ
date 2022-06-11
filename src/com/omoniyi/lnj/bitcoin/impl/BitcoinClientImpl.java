@@ -1,4 +1,4 @@
-//package com.omoniyi.lnj.service.bitcoin.impl;
+package com.omoniyi.lnj.bitcoin.impl;//package com.omoniyi.lnj.service.bitcoin.impl;
 //
 //import com.omoniyi.lnj.model.*;
 //import com.omoniyi.lnj.service.bitcoin.BitcoinClient;
