@@ -9,11 +9,14 @@ import org.ldk.batteries.NioPeerHandler;
 import org.ldk.enums.ConfirmationTarget;
 import org.ldk.enums.Network;
 import org.ldk.structs.*;
+import org.ldk.structs.Record;
 import org.ldk.util.TwoTuple;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.util.*;
@@ -32,6 +35,12 @@ public class LDJService {
     private final String PEER_HOST = "127.0.0.1";
     private final int PEER_PORT = 10009;
     private final String refundAddress = "";
+
+    private NioPeerHandler globalPeerHandler;
+
+
+    org.slf4j.Logger slf4jLogger = LoggerFactory.getLogger(LDJService.class);
+
 
 
     private final BitcoinCoreChainBackend chainBackend = new BitcoinCoreChainBackend(NetworkParameters.fromID(ID_REGTEST));
@@ -54,7 +63,17 @@ public class LDJService {
         });
 
         // Step 2
-        final var logger = org.ldk.structs.Logger.new_impl(System.out::println);
+        final var logger = org.ldk.structs.Logger.new_impl(new  org.ldk.structs.Logger.LoggerInterface(){
+
+            @Override
+            public void log(Record record) {
+                slf4jLogger.info(
+                        "[{}] {}"
+                        , record.get_level()
+                        , record.get_args()
+                );
+            }
+        });
 
         // Step 3
         final BroadcasterInterface txBroadcaster = BroadcasterInterface.new_impl(chainBackend::publish);
@@ -241,6 +260,7 @@ public class LDJService {
 
         // Step 13 - DONE
         final NioPeerHandler peerHandler = channelManagerConstructor.nio_peer_handler;
+        setGlobalPeerHandler(peerHandler);
         final int port = 9730;
         peerHandler.bind_listener(new InetSocketAddress("127.0.0.1", port));
 //        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
@@ -335,5 +355,30 @@ public class LDJService {
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public void connect(String nodeId, String host, int port) {
+        try {
+            getGlobalPeerHandler().connect(
+                    Hex.decode(nodeId)
+                    , new InetSocketAddress(host, port)
+                    , 10000
+            );
+            slf4jLogger.info("Connected Successfully...");
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public NioPeerHandler getGlobalPeerHandler() {
+        return globalPeerHandler;
+    }
+
+    public void setGlobalPeerHandler(NioPeerHandler globalPeerHandler) {
+        if(globalPeerHandler == null){
+            slf4jLogger.info("NioPeerHandler is null");
+        } else {
+            this.globalPeerHandler = globalPeerHandler;
+            slf4jLogger.info("NioPeerHandler set successfully... {}", globalPeerHandler);        }
     }
 }
