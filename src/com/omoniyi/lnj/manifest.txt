@@ -1,0 +1,1 @@
+Main-Class: com.omoniyi.lnj.LDJServiceClient
