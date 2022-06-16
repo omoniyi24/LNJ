@@ -13,9 +13,11 @@ import org.ldk.structs.Record;
 import org.ldk.util.TwoTuple;
 import org.slf4j.LoggerFactory;
 
-import java.io.*;
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.net.InetSocketAddress;
-import java.net.Socket;
 import java.nio.file.Files;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -26,20 +28,13 @@ import static org.bitcoinj.core.NetworkParameters.ID_REGTEST;
 /**
  * @author OMONIYI ILESANMI
  */
-public class LDJService extends Thread{
+public class LDJService {
 
     private final String SEED = "1E99423A4ED27608A15A2616A2B0E9E52CED330AC530EDCC32C8FFC6A526AEDD";
     private final String PEER_PUBKEY = "03ebb579eefc96a67517761c2c9d1ca692466d43e4f7ca7773db342f3aa8ff5716";
     private final String PEER_HOST = "127.0.0.1";
     private final int PEER_PORT = 10009;
     private final String refundAddress = "";
-
-    static Map<String, Thread> connectorServices = new HashMap<>();
-
-    Socket connection;
-    InputStream in;
-    OutputStream out;
-    Thread _t;
 
     private NioPeerHandler globalPeerHandler;
 
@@ -49,34 +44,6 @@ public class LDJService extends Thread{
 
 
     private final BitcoinCoreChainBackend chainBackend = new BitcoinCoreChainBackend(NetworkParameters.fromID(ID_REGTEST));
-
-    public LDJService(String name, Socket sock, InputStream _in, OutputStream _out) {
-        this.connection = sock;
-        try {
-            in = _in;
-            out = _out;
-//            out.flush();
-        } catch (Exception e) {
-            System.err.println("Wystapil blad laczenia do socketu..");
-        }
-        // add this to the list of references to the threads
-        LDJService.connectorServices.put(name, this);
-    }
-
-    public Thread getThreadByName(String threadName) {
-        return LDJService.connectorServices.get(threadName);
-    }
-
-    @Override
-    public void run() {
-        try {
-            startLNJ();
-//            String arg = (String) in.readObject();
-//            connect(PEER_PUBKEY, PEER_HOST, PEER_PORT);
-        } catch (Exception exception) {
-            exception.printStackTrace();
-        }
-    }
 
     static class WatchedTransaction {
         public final byte[] id;
@@ -89,7 +56,7 @@ public class LDJService extends Thread{
         }
     }
 
-    void startLNJ() throws Exception {
+    void start() throws Exception {
         // Step 1
         final var feeEstimator = org.ldk.structs.FeeEstimator.new_impl(confirmation_target -> {
             return 12500; // TODO
@@ -294,31 +261,31 @@ public class LDJService extends Thread{
         // Step 13 - DONE
         final NioPeerHandler peerHandler = channelManagerConstructor.nio_peer_handler;
         setGlobalPeerHandler(peerHandler);
-        final int port = 9730;
+        final int port = 9731;
         peerHandler.bind_listener(new InetSocketAddress("127.0.0.1", port));
 //        System.out.printf("Node started on port %d. PubKey is %s%n", port, Hex.toHexString(channelManager.get_our_node_id()));
         System.out.printf("LNQ node %s 127.0.0.1:%d%n"
                 , Hex.toHexString(channelManager.get_our_node_id())
                 , port
         );
-        final var peerPubKey = Hex.decode(PEER_PUBKEY);
+        final var peerPubKey = Hex.decode("0353f166d164322e9bed4e87ccbc8056adfdf1a6f4fbb23c441a988fe63a24c101");
 
         System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
 
-        peerHandler.connect(
-                peerPubKey,
-                new InetSocketAddress(PEER_HOST, PEER_PORT),
-                10000
-        );
+//        peerHandler.connect(
+//                peerPubKey,
+//                new InetSocketAddress(PEER_HOST, 9736),
+//                10000
+//        );
 
 
         createInvoice(channelManager, keyManager);
 
-        while (true) {
-            checkBlockchain(relevantTxs, channelManager, chainMonitor);
-            System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
-            Thread.sleep(10000);
-        }
+//        while (true) {
+//            checkBlockchain(relevantTxs, channelManager, chainMonitor);
+//            System.out.printf("Currently having %d channels, %d of them are ready to use.%n", channelManager.list_channels().length, channelManager.list_usable_channels().length);
+//            Thread.sleep(10000);
+//        }
     }
 
     void checkBlockchain(List<WatchedTransaction> relevantTxs, ChannelManager channelManager, ChainMonitor chainMonitor) {
@@ -390,17 +357,13 @@ public class LDJService extends Thread{
         }
     }
 
-    public void connect(String nodeId, String host, int port, InputStream _in, OutputStream _out) {
+    public void connect(String nodeId, String host, int port) {
         try {
-            slf4jLogger.info("Connecting...");
-
             getGlobalPeerHandler().connect(
                     Hex.decode(nodeId)
                     , new InetSocketAddress(host, port)
                     , 10000
             );
-            PrintStream printStream =new PrintStream(_out);
-            printStream.println("43");
             slf4jLogger.info("Connected Successfully...");
         } catch (IOException e) {
             throw new UncheckedIOException(e);
